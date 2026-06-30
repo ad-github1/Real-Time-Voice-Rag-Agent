@@ -1,0 +1,90 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "real-time-voice-rag-agent"
+version = "0.1.0"
+description = "Real-time voice RAG agent with offline demo core and provider adapters for LiveKit, AssemblyAI, Ollama/Gemma, LlamaIndex, Cartesia, MCP, and A2A."
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+authors = [{ name = "Advika" }]
+dependencies = []
+
+[project.optional-dependencies]
+api = [
+  "fastapi>=0.115",
+  "uvicorn[standard]>=0.30",
+]
+rag = [
+  "llama-index>=0.12",
+  "llama-index-llms-ollama>=0.4",
+  "llama-index-embeddings-huggingface>=0.5",
+  "ollama>=0.4",
+]
+voice = [
+  "livekit-agents>=1.0",
+  "livekit-api>=0.8",
+  "assemblyai>=0.35",
+  "cartesia>=1.0",
+  "silero-vad>=5.1",
+  "sounddevice>=0.4",
+]
+openai = [
+  "openai>=1.99",
+]
+protocols = [
+  "mcp>=1.2",
+]
+observability = [
+  "opentelemetry-api>=1.28",
+  "opentelemetry-sdk>=1.28",
+  "opentelemetry-exporter-otlp>=1.28",
+  "structlog>=24.4",
+]
+dev = [
+  "pytest>=8.3",
+  "ruff>=0.8",
+  "mypy>=1.13",
+]
+all = [
+  "fastapi>=0.115",
+  "uvicorn[standard]>=0.30",
+  "llama-index>=0.12",
+  "llama-index-llms-ollama>=0.4",
+  "llama-index-embeddings-huggingface>=0.5",
+  "ollama>=0.4",
+  "livekit-agents>=1.0",
+  "livekit-api>=0.8",
+  "assemblyai>=0.35",
+  "cartesia>=1.0",
+  "silero-vad>=5.1",
+  "sounddevice>=0.4",
+  "openai>=1.99",
+  "mcp>=1.2",
+  "opentelemetry-api>=1.28",
+  "opentelemetry-sdk>=1.28",
+  "opentelemetry-exporter-otlp>=1.28",
+  "structlog>=24.4",
+  "pytest>=8.3",
+  "ruff>=0.8",
+  "mypy>=1.13",
+]
+
+[project.scripts]
+voice-rag-agent = "voice_rag_agent.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.mypy]
+python_version = "3.10"
+strict = true
+warn_unused_ignores = true
+warn_redundant_casts = true
+exclude = ["work", "outputs"]
