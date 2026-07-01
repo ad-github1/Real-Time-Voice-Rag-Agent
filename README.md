@@ -34,3 +34,12 @@ BM25-based local RAG retrieval over sample documents.
 Ollama/Gemma for local reasoning.
 Cartesia for text-to-speech playback.
 ffplay/FFmpeg for local audio output.
+
+What It Does
+Streams one JSON event envelope across CLI, HTTP, A2A, MCP, and voice transports.
+Retrieves grounded chunks from local documents with deterministic BM25 for tests.
+Supports optional LlamaIndex retrieval for production vector or hybrid search.
+Streams model deltas from Ollama's local JSON API or OpenAI's Responses API.
+Runs a real local voice path with AssemblyAI ASR and Cartesia TTS.
+Keeps ASR, retrieval, reasoning, TTS, tracing, and transport as separate adapters.
+Records trace JSONL files for latency analysis and eval debugging.
