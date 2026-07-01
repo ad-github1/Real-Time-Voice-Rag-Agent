@@ -1,15 +1,53 @@
+````md
 # Real-Time Voice RAG Agent
 
-A production-shaped voice RAG project that turns static document search into natural voice conversation. The core runs offline with no paid services; provider adapters are ready for LiveKit room transport, AssemblyAI transcription, Ollama/Gemma or OpenAI reasoning, Cartesia TTS, MCP tools, and A2A task interoperability.
+A working real-time Voice RAG project that turns static document search into natural voice conversation. The local demo connects microphone input, AssemblyAI real-time transcription, document-grounded RAG retrieval, Ollama/Gemma reasoning, and Cartesia text-to-speech playback through one streaming JSON event pipeline.
+
+The core can also run offline for tests using deterministic local components. Provider adapters are kept separate for LiveKit room transport, AssemblyAI transcription, Ollama/Gemma or OpenAI reasoning, Cartesia TTS, MCP tools, and A2A task interoperability.
+
+## Real Voice Demo
+
+This project supports a working local voice RAG demo:
+
+Mic → AssemblyAI Streaming ASR → RAG retrieval → Ollama/Gemma reasoning → Cartesia TTS → Mac speaker output
+
+### Run locally
+
+```bash
+cp .env.example .env
+# Fill ASSEMBLYAI_API_KEY and CARTESIA_API_KEY in .env
+
+./scripts/run_voice_live.sh
+````
+
+Expected event stream:
+
+```text
+asr.transcript
+retrieval.completed
+retrieval.chunk
+answer.delta
+tts.audio
+answer.completed
+```
+
+The live demo uses:
+
+* AssemblyAI for real-time microphone transcription.
+* BM25-based local RAG retrieval over sample documents.
+* Ollama/Gemma for local reasoning.
+* Cartesia for text-to-speech playback.
+* ffplay/FFmpeg for local audio output.
 
 ## What It Does
 
-- Streams one JSON event envelope across CLI, HTTP, A2A, MCP, and voice transports.
-- Retrieves grounded chunks from local documents with deterministic BM25 for tests.
-- Supports optional LlamaIndex retrieval for production vector or hybrid search.
-- Streams model deltas from Ollama's local JSON API or OpenAI's Responses API.
-- Keeps ASR, retrieval, reasoning, TTS, tracing, and transport as separate adapters.
-- Records trace JSONL files for latency analysis and eval debugging.
+* Streams one JSON event envelope across CLI, HTTP, A2A, MCP, and voice transports.
+* Retrieves grounded chunks from local documents with deterministic BM25 for tests.
+* Supports optional LlamaIndex retrieval for production vector or hybrid search.
+* Streams model deltas from Ollama's local JSON API or OpenAI's Responses API.
+* Runs a real local voice path with AssemblyAI ASR and Cartesia TTS.
+* Keeps ASR, retrieval, reasoning, TTS, tracing, and transport as separate adapters.
+* Records trace JSONL files for latency analysis and eval debugging.
 
 ## Quick Start
 
@@ -26,10 +64,16 @@ Stream the same turn as NDJSON:
 PYTHONPATH=src python3 -m voice_rag_agent.cli query "What do MCP and A2A expose?" --stream
 ```
 
-Simulate a voice turn:
+Simulate a voice turn without real ASR/TTS providers:
 
 ```bash
 PYTHONPATH=src python3 -m voice_rag_agent.cli voice-demo "What services are used for transcription and TTS?"
+```
+
+Run the real local voice demo after setting `.env`:
+
+```bash
+./scripts/run_voice_live.sh
 ```
 
 Run evals:
@@ -47,7 +91,11 @@ PYTHONPATH=src python3 -m voice_rag_agent.cli serve --host 127.0.0.1 --port 8000
 
 ## Configuration
 
-Copy `.env.example` to `.env` and export values in your shell or process manager. The offline default is:
+Copy `.env.example` to `.env` and fill only your local secrets in `.env`.
+
+Do not commit `.env`.
+
+The offline default is:
 
 ```bash
 VOICE_RAG_REASONER=template
@@ -70,47 +118,82 @@ OPENAI_API_KEY=...
 OPENAI_MODEL=...
 ```
 
+For the real voice demo:
+
+```bash
+ASSEMBLYAI_API_KEY=...
+CARTESIA_API_KEY=...
+CARTESIA_VOICE_ID=f786b574-daa5-4673-aa0c-cbe3e8534c02
+VOICE_RAG_REASONER=ollama
+OLLAMA_MODEL=gemma3:4b
+```
+
 ## Architecture
 
 ```mermaid
 flowchart LR
-    Mic["LiveKit audio"] --> VAD["Silero or energy VAD"]
-    VAD --> ASR["AssemblyAI ASR"]
+    Mic["Microphone or LiveKit audio"] --> ASR["AssemblyAI ASR"]
     ASR --> Events["Streaming JSON events"]
     Events --> RAG["RAG engine"]
     Docs["Documents"] --> Retriever["BM25 or LlamaIndex retriever"]
     Retriever --> RAG
     RAG --> LLM["Template, Ollama/Gemma, or OpenAI"]
     LLM --> TTS["Cartesia TTS"]
-    TTS --> Room["LiveKit room"]
+    TTS --> Speaker["Local speaker or LiveKit room"]
     RAG --> Trace["JSONL traces"]
     RAG --> API["HTTP / MCP / A2A"]
 ```
 
-The core package is dependency-light so tests and demos run anywhere. Production integrations live behind narrow adapters in `src/voice_rag_agent/integrations` and `src/voice_rag_agent/protocols`.
+The core package is dependency-light so tests and demos run locally. Production integrations live behind narrow adapters in `src/voice_rag_agent/integrations`, `src/voice_rag_agent/protocols`, and `src/voice_rag_agent/voice`.
 
 ## Project Layout
 
-- `src/voice_rag_agent/rag`: document loading, BM25 cache, prompting, streaming RAG engine.
-- `src/voice_rag_agent/llm`: deterministic, Ollama, and OpenAI reasoners.
-- `src/voice_rag_agent/voice`: ASR/TTS protocols, VAD, voice orchestration.
-- `src/voice_rag_agent/protocols`: A2A and MCP surfaces.
-- `src/voice_rag_agent/api.py`: FastAPI query and streaming endpoints.
-- `data/sample_docs`: small corpus for demos and tests.
-- `tests`: standard-library unittest suite.
+* `src/voice_rag_agent/rag`: document loading, BM25 cache, prompting, streaming RAG engine.
+* `src/voice_rag_agent/llm`: deterministic, Ollama, and OpenAI reasoners.
+* `src/voice_rag_agent/voice`: ASR/TTS protocols, VAD, audio sink, and voice orchestration.
+* `src/voice_rag_agent/protocols`: A2A and MCP surfaces.
+* `src/voice_rag_agent/api.py`: FastAPI query and streaming endpoints.
+* `data/sample_docs`: small corpus for demos and tests.
+* `scripts/run_voice_live.sh`: one-command local voice demo runner.
+* `tests`: standard-library unittest suite.
 
 ## Latency Strategy
 
-The agent optimizes perceived latency by gating speech before transcription, triggering retrieval only on final transcripts, caching repeated queries, keeping top-k small, streaming answer deltas, and letting TTS emit small chunks as soon as text is ready.
+The agent optimizes perceived latency by triggering retrieval only on final ASR transcripts, caching repeated queries, keeping top-k small, streaming answer deltas, and sending sentence-level chunks to TTS as soon as text is ready.
 
 Trace files are written to `traces/<trace_id>.jsonl` when `VOICE_RAG_ENABLE_TRACING=true`. Each trace records event timings and spans for retrieval and reasoning.
 
+## Current Status
+
+Working:
+
+1. Offline text RAG demo.
+2. Streaming NDJSON query mode.
+3. Simulated voice turn through CLI.
+4. Real local voice demo with AssemblyAI ASR, Ollama/Gemma reasoning, and Cartesia TTS.
+5. MCP and A2A protocol surfaces.
+6. FastAPI query and streaming endpoints.
+
+Next improvements:
+
+1. Complete `integrations/livekit_worker.py` for real LiveKit room transport.
+2. Add PDF, DOCX, and web document ingestion.
+3. Promote LlamaIndex or hybrid retrieval as a first-class production retrieval option.
+4. Add richer latency metrics for ASR, retrieval, LLM time-to-first-token, TTS first-audio, and full turn latency.
+5. Export traces to OpenTelemetry if the `observability` extra is installed.
+
 ## Production Wiring
 
-1. Replace `AssemblyAITranscriptSource.stream()` with AssemblyAI's streaming client.
-2. Replace `CartesiaTTS.synthesize()` with Cartesia audio chunk streaming.
-3. Complete `integrations/livekit_worker.py` by connecting LiveKit audio frames to ASR and TTS output.
-4. Use `LlamaIndexRetrieverAdapter` or a vector-store-backed retriever when semantic recall matters.
-5. Export traces to OpenTelemetry if you install the `observability` extra.
-
 The RAG engine does not care which transport calls it. That makes local evals, HTTP requests, MCP tool calls, A2A tasks, and live voice turns share one behavior.
+
+The current local voice demo uses microphone input and local speaker output. LiveKit room transport is the main remaining production transport layer.
+
+````
+
+After pasting, save in nano:
+
+```text
+Control + O
+Enter
+Control + X
+````
