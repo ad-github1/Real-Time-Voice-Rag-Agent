@@ -18,7 +18,7 @@ cp .env.example .env
 # Fill ASSEMBLYAI_API_KEY and CARTESIA_API_KEY in .env
 
 ./scripts/run_voice_live.sh
-````
+
 
 Expected event stream:
 
