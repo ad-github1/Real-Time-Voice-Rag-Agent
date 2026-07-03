@@ -173,6 +173,38 @@ The agent optimizes perceived latency by triggering retrieval only on final ASR 
 
 Trace files are written to `traces/<trace_id>.jsonl` when `VOICE_RAG_ENABLE_TRACING=true`. Each trace records event timings and spans for retrieval and reasoning.
 
+## Hybrid Retrieval and Diagnostics
+
+The project supports both BM25 lexical retrieval and hybrid retrieval.
+
+Run BM25 retrieval diagnostics:
+
+```bash
+PYTHONPATH=src python3 -m voice_rag_agent.cli retrieve "What services are used for transcription and TTS?"
+
+```
+
+Run hybrid retrieval diagnostics:
+
+```bash
+PYTHONPATH=src python3 -m voice_rag_agent.cli retrieve "What services are used for transcription and TTS?" --retriever hybrid
+```
+
+Emit JSON diagnostics:
+
+```bash
+PYTHONPATH=src python3 -m voice_rag_agent.cli retrieve "What services are used for transcription and TTS?" --retriever hybrid --json
+```
+
+Run generation with a selected retriever:
+
+```bash
+PYTHONPATH=src python3 -m voice_rag_agent.cli query "What file types are supported for ingestion?" --retriever bm25 --stream
+PYTHONPATH=src python3 -m voice_rag_agent.cli query "What file types are supported for ingestion?" --retriever hybrid --stream
+```
+
+Hybrid retrieval combines BM25 lexical scoring with lightweight semantic similarity and score fusion. Diagnostics include BM25 score, semantic score, normalized scores, and final fused score.
+
 ## Current Status
 
 Working:
@@ -185,6 +217,7 @@ Working:
 6. FastAPI query and streaming endpoints.
 7. PDF, DOCX, HTML/HTM, and URL ingestion support.
 8. Latency metrics report CLI with avg, p50, p95, min, and max summaries.
+9. Hybrid retrieval with BM25, lightweight semantic similarity, score fusion, and JSON diagnostics.
 
 Next improvements:
 
@@ -199,4 +232,5 @@ Next improvements:
 The RAG engine does not care which transport calls it. That makes local evals, HTTP requests, MCP tool calls, A2A tasks, and live voice turns share one behavior.
 
 The current local voice demo uses microphone input and local speaker output. LiveKit room transport is the main remaining production transport layer.
+
 
