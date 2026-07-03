@@ -17,3 +17,6 @@ outputs/
 !outputs/.gitkeep
 work/
 !work/.gitkeep
+
+# API-uploaded documents
+data/sample_docs/api_uploads/
