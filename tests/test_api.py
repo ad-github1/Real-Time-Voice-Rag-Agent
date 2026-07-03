@@ -145,3 +145,51 @@ def test_upload_rejects_empty_file(tmp_path: Path) -> None:
 
     assert response.status_code == 400
     assert response.json()["detail"] == "Uploaded file is empty."
+
+
+def test_api_adds_request_id_and_structured_error_response(tmp_path: Path) -> None:
+    app = create_app(_settings(tmp_path))
+    client = TestClient(app)
+
+    response = client.post(
+        "/documents/upload?rebuild=true",
+        files={"file": ("bad.exe", b"not allowed", "application/octet-stream")},
+        headers={"X-Request-ID": "test-request-123"},
+    )
+
+    assert response.status_code == 400
+    assert response.headers["X-Request-ID"] == "test-request-123"
+
+    payload = response.json()
+    assert "Unsupported file type" in payload["detail"]
+    assert payload["error"]["code"] == "bad_request"
+    assert payload["error"]["request_id"] == "test-request-123"
+    assert payload["error"]["status_code"] == 400
+
+
+def test_api_rate_limit_returns_structured_429(tmp_path: Path) -> None:
+    app = create_app(_settings(tmp_path))
+    app.state.rate_limiter.max_requests = 1
+    client = TestClient(app)
+
+    first = client.get("/health", headers={"X-Forwarded-For": "203.0.113.10"})
+    assert first.status_code == 200
+    assert first.headers["X-RateLimit-Limit"] == "1"
+    assert first.headers["X-RateLimit-Remaining"] == "0"
+
+    second = client.get(
+        "/health",
+        headers={
+            "X-Forwarded-For": "203.0.113.10",
+            "X-Request-ID": "rate-limit-test",
+        },
+    )
+
+    assert second.status_code == 429
+    assert second.headers["X-Request-ID"] == "rate-limit-test"
+
+    payload = second.json()
+    assert payload["detail"] == "Too many requests. Please retry later."
+    assert payload["error"]["code"] == "rate_limit_exceeded"
+    assert payload["error"]["request_id"] == "rate-limit-test"
+    assert payload["error"]["status_code"] == 429
