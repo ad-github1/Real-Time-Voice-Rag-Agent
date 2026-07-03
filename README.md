@@ -247,6 +247,44 @@ curl -X POST http://127.0.0.1:8000/index/rebuild
 
 The upload API validates supported file types, sanitizes filenames, applies an upload size limit, saves files under the configured data directory, rebuilds the persistent index, and reloads the RAG engine.
 
+## Docker API Deployment
+
+The FastAPI RAG API can run locally through Docker.
+
+Build the API image:
+
+```bash
+docker build -t voice-rag-agent-api:local .
+```
+
+Run the API with Docker Compose:
+
+```bash
+docker compose up --build api
+```
+
+Check health:
+
+```bash
+curl http://127.0.0.1:8000/health
+```
+
+Ask a question:
+
+```bash
+curl -X POST http://127.0.0.1:8000/query \
+  -H "Content-Type: application/json" \
+  -d '{"query":"What services are used for transcription and TTS?"}'
+```
+
+Stop the API:
+
+```bash
+docker compose down
+```
+
+The Docker setup mounts local `data/`, `traces/`, and `outputs/` directories, keeps `.env` out of the image, and exposes the FastAPI server on port `8000`.
+
 ## Current Status
 
 Working:
@@ -261,6 +299,7 @@ Working:
 8. Latency metrics report CLI with avg, p50, p95, min, and max summaries.
 9. Hybrid retrieval with BM25, lightweight semantic similarity, score fusion, and JSON diagnostics.
 10. FastAPI document upload and index-management endpoints with safe upload validation and automatic engine reload.
+11. Dockerized FastAPI deployment with Compose, healthcheck, mounted data/traces/outputs, and Makefile targets.
 
 Next improvements:
 
@@ -275,6 +314,7 @@ Next improvements:
 The RAG engine does not care which transport calls it. That makes local evals, HTTP requests, MCP tool calls, A2A tasks, and live voice turns share one behavior.
 
 The current local voice demo uses microphone input and local speaker output. LiveKit room transport is the main remaining production transport layer.
+
 
 
 
