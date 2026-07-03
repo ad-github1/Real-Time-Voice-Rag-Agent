@@ -4,7 +4,6 @@ import asyncio
 import re
 import time
 from dataclasses import dataclass
-from pathlib import Path
 from typing import AsyncIterator
 
 from voice_rag_agent.config import Settings
@@ -13,6 +12,7 @@ from voice_rag_agent.llm.base import Reasoner, TemplateReasoner
 from voice_rag_agent.observability import TraceRecorder
 
 from .documents import load_documents
+from .index_store import load_index_if_valid
 from .prompts import build_grounded_prompt
 from .retriever import BM25Retriever, CachedRetriever, Retriever
 
@@ -45,8 +45,10 @@ class RagEngine:
         yield self._event("query.received", trace_id, {"text": query})
 
         retrieval_started_ns = time.perf_counter_ns()
+
         with self.tracer.span(trace_id, "retrieval", query=query, top_k=self.top_k):
             results = self.retriever.retrieve(query, self.top_k)
+
         retrieval_latency_ms = _elapsed_ms(retrieval_started_ns)
 
         yield self._event(
@@ -134,12 +136,22 @@ class RagEngine:
     def _event(self, event_type: str, trace_id: str, payload: dict[str, object]) -> RagEvent:
         event = RagEvent(type=event_type, trace_id=trace_id, payload=payload)
         self.tracer.write_event(event)
+
         return event
 
 
 def build_engine(settings: Settings, reasoner: Reasoner | None = None) -> RagEngine:
     settings.ensure_dirs()
-    chunks = load_documents(settings.data_dir, settings.chunk_size, settings.chunk_overlap)
+
+    chunks = load_index_if_valid(
+        data_dir=settings.data_dir,
+        index_dir=settings.index_dir,
+        chunk_size=settings.chunk_size,
+        chunk_overlap=settings.chunk_overlap,
+    )
+
+    if chunks is None:
+        chunks = load_documents(settings.data_dir, settings.chunk_size, settings.chunk_overlap)
 
     retriever = CachedRetriever(
         BM25Retriever(chunks),
@@ -173,6 +185,7 @@ def _preview(text: str, max_chars: int = 360) -> str:
 
 def _elapsed_ms(start_ns: int, end_ns: int | None = None) -> float:
     end = end_ns if end_ns is not None else time.perf_counter_ns()
+
     return round((end - start_ns) / 1_000_000, 3)
 
 

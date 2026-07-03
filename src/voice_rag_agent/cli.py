@@ -13,6 +13,12 @@ from .events import async_events_to_ndjson
 from .llm import build_reasoner
 from .metrics import format_metrics_report, report_to_dict, summarize_metrics
 from .rag.engine import build_engine
+from .rag.index_store import (
+    build_persistent_index,
+    clean_index,
+    format_index_stats,
+    index_stats,
+)
 from .voice.asr import AssemblyAITranscriptSource, IterableTranscriptSource
 from .voice.audio_sink import FfplayPCMFloat32Sink
 from .voice.pipeline import VoiceRagPipeline
@@ -32,6 +38,8 @@ def main(argv: list[str] | None = None) -> int:
         return _voice_live(settings, args.tts)
     if args.command == "metrics":
         return _metrics(settings, mode=args.mode, limit=args.limit, json_output=args.json)
+    if args.command == "index":
+        return _index(settings, action=args.index_action, json_output=args.json)
     if args.command == "eval":
         return _eval(settings, Path(args.cases), Path(args.output) if args.output else None)
     if args.command == "serve":
@@ -84,6 +92,18 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     metrics.add_argument("--json", action="store_true", help="Emit metrics report as JSON.")
 
+    index = subparsers.add_parser("index", help="Manage persistent retrieval index.")
+    index_subparsers = index.add_subparsers(dest="index_action", required=True)
+
+    index_build = index_subparsers.add_parser("build", help="Build persistent chunk index.")
+    index_build.add_argument("--json", action="store_true", help="Emit build result as JSON.")
+
+    index_stats_parser = index_subparsers.add_parser("stats", help="Show persistent index stats.")
+    index_stats_parser.add_argument("--json", action="store_true", help="Emit index stats as JSON.")
+
+    index_clean = index_subparsers.add_parser("clean", help="Delete persistent index files.")
+    index_clean.add_argument("--json", action="store_true", help="Emit clean result as JSON.")
+
     eval_parser = subparsers.add_parser("eval", help="Run grounding checks.")
     eval_parser.add_argument("--cases", default="tests/fixtures/eval_cases.json")
     eval_parser.add_argument("--output", default="outputs/eval_results.json")
@@ -117,6 +137,7 @@ def _settings_from_args(args: argparse.Namespace) -> Settings:
 def _replace(settings: Settings, **changes: object) -> Settings:
     values = settings.__dict__.copy()
     values.update(changes)
+
     return Settings(**values)
 
 
@@ -215,6 +236,65 @@ def _metrics(settings: Settings, mode: str, limit: int | None, json_output: bool
     return 0
 
 
+def _index(settings: Settings, action: str, json_output: bool) -> int:
+    if action == "build":
+        result = build_persistent_index(
+            data_dir=settings.data_dir,
+            index_dir=settings.index_dir,
+            chunk_size=settings.chunk_size,
+            chunk_overlap=settings.chunk_overlap,
+        )
+
+        payload = {
+            "index_dir": str(result.index_dir),
+            "manifest_path": str(result.manifest_path),
+            "chunks_path": str(result.chunks_path),
+            "source_count": result.source_count,
+            "chunk_count": result.chunk_count,
+            "duplicate_chunks_skipped": result.duplicate_chunks_skipped,
+            "created_at_ms": result.created_at_ms,
+        }
+
+        if json_output:
+            print(json.dumps(payload, indent=2))
+        else:
+            print("Persistent index built successfully.")
+            print(f"Index dir: {result.index_dir}")
+            print(f"Sources: {result.source_count}")
+            print(f"Chunks: {result.chunk_count}")
+            print(f"Duplicate chunks skipped: {result.duplicate_chunks_skipped}")
+
+        return 0
+
+    if action == "stats":
+        stats = index_stats(settings.index_dir, settings.data_dir)
+
+        if json_output:
+            print(json.dumps(stats, indent=2))
+        else:
+            print(format_index_stats(stats))
+
+        return 0
+
+    if action == "clean":
+        removed = clean_index(settings.index_dir)
+        payload = {"index_dir": str(settings.index_dir), "removed": removed}
+
+        if json_output:
+            print(json.dumps(payload, indent=2))
+        else:
+            if removed:
+                print(f"Removed persistent index: {settings.index_dir}")
+            else:
+                print(f"No persistent index found at: {settings.index_dir}")
+
+        return 0
+
+    print(f"Unknown index action: {action}", file=sys.stderr)
+
+    return 2
+
+
 def _eval(settings: Settings, cases: Path, output: Path | None) -> int:
     results = run_eval(
         _engine(settings),
@@ -245,6 +325,7 @@ def _serve(settings: Settings, host: str, port: int) -> int:
     from .api import create_app
 
     uvicorn.run(create_app(settings), host=host, port=port, reload=False)
+
     return 0
 
 
@@ -258,6 +339,7 @@ def _a2a(settings: Settings, host: str, port: int) -> int:
     from .protocols.a2a import create_a2a_app
 
     uvicorn.run(create_a2a_app(settings), host=host, port=port, reload=False)
+
     return 0
 
 
@@ -265,6 +347,7 @@ def _mcp(settings: Settings) -> int:
     from .protocols.mcp_server import run_stdio
 
     run_stdio(settings)
+
     return 0
 
 
