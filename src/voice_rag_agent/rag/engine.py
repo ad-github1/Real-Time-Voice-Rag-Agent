@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import re
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import AsyncIterator
@@ -13,7 +14,7 @@ from voice_rag_agent.observability import TraceRecorder
 
 from .documents import load_documents
 from .prompts import build_grounded_prompt
-from .retriever import BM25Retriever, CachedRetriever, RetrievedChunk, Retriever
+from .retriever import BM25Retriever, CachedRetriever, Retriever
 
 
 @dataclass(frozen=True)
@@ -38,11 +39,15 @@ class RagEngine:
 
     async def stream_query(self, query: str, trace_id: str | None = None) -> AsyncIterator[RagEvent]:
         trace_id = trace_id or new_trace_id()
+        query_started_ns = time.perf_counter_ns()
+
         query = _normalize_query(query)
         yield self._event("query.received", trace_id, {"text": query})
 
+        retrieval_started_ns = time.perf_counter_ns()
         with self.tracer.span(trace_id, "retrieval", query=query, top_k=self.top_k):
             results = self.retriever.retrieve(query, self.top_k)
+        retrieval_latency_ms = _elapsed_ms(retrieval_started_ns)
 
         yield self._event(
             "retrieval.completed",
@@ -50,8 +55,10 @@ class RagEngine:
             {
                 "count": len(results),
                 "citations": [result.citation() for result in results],
+                "retrieval_latency_ms": retrieval_latency_ms,
             },
         )
+
         for index, result in enumerate(results):
             yield self._event(
                 "retrieval.chunk",
@@ -66,12 +73,23 @@ class RagEngine:
 
         prompt = build_grounded_prompt(query, results)
         answer_parts: list[str] = []
+
+        reasoning_started_ns = time.perf_counter_ns()
+        llm_time_to_first_token_ms: float | None = None
+
         with self.tracer.span(trace_id, "reasoning", provider=self.reasoner.name):
             async for delta in self.reasoner.stream_answer(query, results, prompt):
+                if delta and llm_time_to_first_token_ms is None:
+                    llm_time_to_first_token_ms = _elapsed_ms(reasoning_started_ns)
+
                 answer_parts.append(delta)
                 yield self._event("answer.delta", trace_id, {"text": delta})
 
+        llm_total_latency_ms = _elapsed_ms(reasoning_started_ns)
+        query_total_latency_ms = _elapsed_ms(query_started_ns)
+
         answer_text = "".join(answer_parts).strip()
+
         yield self._event(
             "answer.completed",
             trace_id,
@@ -79,6 +97,24 @@ class RagEngine:
                 "text": answer_text,
                 "citations": [result.citation() for result in results],
                 "grounded": bool(results),
+                "retrieval_latency_ms": retrieval_latency_ms,
+                "llm_time_to_first_token_ms": llm_time_to_first_token_ms,
+                "llm_total_latency_ms": llm_total_latency_ms,
+                "query_total_latency_ms": query_total_latency_ms,
+            },
+        )
+
+        yield self._event(
+            "metrics.completed",
+            trace_id,
+            {
+                "mode": "text",
+                "retrieval_latency_ms": retrieval_latency_ms,
+                "llm_time_to_first_token_ms": llm_time_to_first_token_ms,
+                "llm_total_latency_ms": llm_total_latency_ms,
+                "query_total_latency_ms": query_total_latency_ms,
+                "retrieved_chunks": len(results),
+                "reasoner": self.reasoner.name,
             },
         )
 
@@ -86,11 +122,13 @@ class RagEngine:
         answer = ""
         citations: list[dict[str, str | int | float]] = []
         last_trace_id = trace_id or new_trace_id()
+
         async for event in self.stream_query(query, trace_id=last_trace_id):
             if event.type == "answer.completed":
                 answer = str(event.payload["text"])
                 citations = list(event.payload["citations"])  # type: ignore[arg-type]
                 last_trace_id = event.trace_id
+
         return RagAnswer(text=answer, citations=citations, trace_id=last_trace_id)
 
     def _event(self, event_type: str, trace_id: str, payload: dict[str, object]) -> RagEvent:
@@ -102,11 +140,14 @@ class RagEngine:
 def build_engine(settings: Settings, reasoner: Reasoner | None = None) -> RagEngine:
     settings.ensure_dirs()
     chunks = load_documents(settings.data_dir, settings.chunk_size, settings.chunk_overlap)
+
     retriever = CachedRetriever(
         BM25Retriever(chunks),
         max_entries=settings.max_cache_entries,
     )
+
     tracer = TraceRecorder(settings.trace_dir, enabled=settings.enable_tracing)
+
     return RagEngine(
         retriever=retriever,
         reasoner=reasoner or TemplateReasoner(),
@@ -117,19 +158,29 @@ def build_engine(settings: Settings, reasoner: Reasoner | None = None) -> RagEng
 
 def _normalize_query(query: str) -> str:
     normalized = re.sub(r"\s+", " ", query).strip()
+
     if not normalized:
         raise ValueError("Query cannot be empty.")
+
     return normalized
 
 
 def _preview(text: str, max_chars: int = 360) -> str:
     compact = re.sub(r"\s+", " ", text).strip()
+
     return compact if len(compact) <= max_chars else f"{compact[: max_chars - 3]}..."
+
+
+def _elapsed_ms(start_ns: int, end_ns: int | None = None) -> float:
+    end = end_ns if end_ns is not None else time.perf_counter_ns()
+    return round((end - start_ns) / 1_000_000, 3)
 
 
 async def collect_events(events: AsyncIterator[RagEvent]) -> list[RagEvent]:
     collected: list[RagEvent] = []
+
     async for event in events:
         collected.append(event)
         await asyncio.sleep(0)
+
     return collected

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import time
 from typing import AsyncIterator
 
 from voice_rag_agent.events import RagEvent
@@ -30,11 +31,25 @@ class VoiceRagPipeline:
             if not transcript.is_final:
                 continue
 
+            turn_started_ns = time.perf_counter_ns()
             turn_trace_id = "voice_pipeline"
             sentence_buffer = ""
 
+            engine_metrics: dict[str, object] = {}
+            answer_completed = False
+
+            tts_started_ns: int | None = None
+            first_tts_audio_ns: int | None = None
+            tts_audio_chunks = 0
+            tts_audio_bytes = 0
+
             async for event in self.engine.stream_query(transcript.text):
                 turn_trace_id = event.trace_id
+
+                if event.type == "metrics.completed":
+                    engine_metrics = dict(event.payload)
+                    continue
+
                 yield event
 
                 if event.type == "answer.delta":
@@ -44,7 +59,16 @@ class VoiceRagPipeline:
                     ready_sentences, sentence_buffer = _pop_ready_sentences(sentence_buffer)
 
                     for sentence in ready_sentences:
+                        if tts_started_ns is None:
+                            tts_started_ns = time.perf_counter_ns()
+
                         async for audio in self.tts.synthesize(sentence):
+                            if first_tts_audio_ns is None:
+                                first_tts_audio_ns = time.perf_counter_ns()
+
+                            tts_audio_chunks += 1
+                            tts_audio_bytes += len(audio)
+
                             if self.audio_sink:
                                 await self.audio_sink.write(audio)
 
@@ -59,10 +83,20 @@ class VoiceRagPipeline:
                             )
 
                 if event.type == "answer.completed":
+                    answer_completed = True
                     tail = sentence_buffer.strip()
 
                     if tail:
+                        if tts_started_ns is None:
+                            tts_started_ns = time.perf_counter_ns()
+
                         async for audio in self.tts.synthesize(tail):
+                            if first_tts_audio_ns is None:
+                                first_tts_audio_ns = time.perf_counter_ns()
+
+                            tts_audio_chunks += 1
+                            tts_audio_bytes += len(audio)
+
                             if self.audio_sink:
                                 await self.audio_sink.write(audio)
 
@@ -75,6 +109,33 @@ class VoiceRagPipeline:
                                     "text": tail,
                                 },
                             )
+
+            if answer_completed:
+                turn_total_latency_ms = _elapsed_ms(turn_started_ns)
+                tts_time_to_first_audio_ms = (
+                    _elapsed_ms(tts_started_ns, first_tts_audio_ns)
+                    if tts_started_ns is not None and first_tts_audio_ns is not None
+                    else None
+                )
+
+                yield RagEvent(
+                    type="metrics.completed",
+                    trace_id=turn_trace_id,
+                    payload={
+                        "mode": "voice",
+                        "retrieval_latency_ms": engine_metrics.get("retrieval_latency_ms"),
+                        "llm_time_to_first_token_ms": engine_metrics.get(
+                            "llm_time_to_first_token_ms"
+                        ),
+                        "llm_total_latency_ms": engine_metrics.get("llm_total_latency_ms"),
+                        "query_total_latency_ms": engine_metrics.get("query_total_latency_ms"),
+                        "tts_time_to_first_audio_ms": tts_time_to_first_audio_ms,
+                        "turn_total_latency_ms": turn_total_latency_ms,
+                        "tts_audio_chunks": tts_audio_chunks,
+                        "tts_audio_bytes": tts_audio_bytes,
+                        "tts_provider": self.tts.name,
+                    },
+                )
 
     @staticmethod
     def _transcript_event(transcript: TranscriptEvent) -> RagEvent:
@@ -97,9 +158,17 @@ def _pop_ready_sentences(buffer: str) -> tuple[list[str], str]:
     for index, char in enumerate(buffer):
         if char in ".!?":
             sentence = buffer[start : index + 1].strip()
+
             if sentence:
                 ready.append(sentence)
+
             start = index + 1
 
     remaining = buffer[start:]
+
     return ready, remaining
+
+
+def _elapsed_ms(start_ns: int, end_ns: int | None = None) -> float:
+    end = end_ns if end_ns is not None else time.perf_counter_ns()
+    return round((end - start_ns) / 1_000_000, 3)
