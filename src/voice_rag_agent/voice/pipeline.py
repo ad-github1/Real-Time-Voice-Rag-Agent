@@ -26,7 +26,17 @@ class VoiceRagPipeline:
 
     async def stream(self) -> AsyncIterator[RagEvent]:
         async for transcript in self.transcript_source.stream():
-            yield self._transcript_event(transcript)
+            transcript_event = self._event(
+                "asr.transcript",
+                "voice_pipeline",
+                {
+                    "text": transcript.text,
+                    "is_final": transcript.is_final,
+                    "confidence": transcript.confidence,
+                    "speaker": transcript.speaker,
+                },
+            )
+            yield transcript_event
 
             if not transcript.is_final:
                 continue
@@ -72,10 +82,10 @@ class VoiceRagPipeline:
                             if self.audio_sink:
                                 await self.audio_sink.write(audio)
 
-                            yield RagEvent(
-                                type="tts.audio",
-                                trace_id=turn_trace_id,
-                                payload={
+                            yield self._event(
+                                "tts.audio",
+                                turn_trace_id,
+                                {
                                     "provider": self.tts.name,
                                     "bytes": len(audio),
                                     "text": sentence,
@@ -100,10 +110,10 @@ class VoiceRagPipeline:
                             if self.audio_sink:
                                 await self.audio_sink.write(audio)
 
-                            yield RagEvent(
-                                type="tts.audio",
-                                trace_id=turn_trace_id,
-                                payload={
+                            yield self._event(
+                                "tts.audio",
+                                turn_trace_id,
+                                {
                                     "provider": self.tts.name,
                                     "bytes": len(audio),
                                     "text": tail,
@@ -118,10 +128,10 @@ class VoiceRagPipeline:
                     else None
                 )
 
-                yield RagEvent(
-                    type="metrics.completed",
-                    trace_id=turn_trace_id,
-                    payload={
+                yield self._event(
+                    "metrics.completed",
+                    turn_trace_id,
+                    {
                         "mode": "voice",
                         "retrieval_latency_ms": engine_metrics.get("retrieval_latency_ms"),
                         "llm_time_to_first_token_ms": engine_metrics.get(
@@ -137,18 +147,10 @@ class VoiceRagPipeline:
                     },
                 )
 
-    @staticmethod
-    def _transcript_event(transcript: TranscriptEvent) -> RagEvent:
-        return RagEvent(
-            type="asr.transcript",
-            trace_id="voice_pipeline",
-            payload={
-                "text": transcript.text,
-                "is_final": transcript.is_final,
-                "confidence": transcript.confidence,
-                "speaker": transcript.speaker,
-            },
-        )
+    def _event(self, event_type: str, trace_id: str, payload: dict[str, object]) -> RagEvent:
+        event = RagEvent(type=event_type, trace_id=trace_id, payload=payload)
+        self.engine.tracer.write_event(event)
+        return event
 
 
 def _pop_ready_sentences(buffer: str) -> tuple[list[str], str]:
