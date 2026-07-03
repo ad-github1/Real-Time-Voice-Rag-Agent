@@ -329,6 +329,63 @@ outputs/otel_traces.json
 
 The exporter converts existing JSONL span/event records into OpenTelemetry-style `resourceSpans`, preserving trace IDs, span IDs, event payloads, attributes, service name, and export summary metadata.
 
+## Production API Hardening
+
+The FastAPI service includes production-style request handling for local and containerized deployment.
+
+Each API response includes a request ID:
+
+```text
+X-Request-ID: <request_id>
+```
+
+Clients can also pass their own request ID:
+
+```bash
+curl -i http://127.0.0.1:8000/health \
+  -H "X-Request-ID: demo-request-123"
+```
+
+The API returns structured JSON errors:
+
+```json
+{
+  "detail": "Uploaded file is empty.",
+  "error": {
+    "code": "bad_request",
+    "message": "Uploaded file is empty.",
+    "request_id": "demo-request-123",
+    "status_code": 400
+  }
+}
+```
+
+The API also includes basic in-memory rate limiting with response headers:
+
+```text
+X-RateLimit-Limit
+X-RateLimit-Remaining
+X-RateLimit-Reset
+```
+
+Run the API locally:
+
+```bash
+PYTHONPATH=src python3 -m voice_rag_agent.cli serve
+```
+
+Check headers:
+
+```bash
+curl -i http://127.0.0.1:8000/health
+```
+
+The rate limit can be configured with environment variables:
+
+```bash
+VOICE_RAG_API_RATE_LIMIT_REQUESTS=120
+VOICE_RAG_API_RATE_LIMIT_WINDOW_SECONDS=60
+```
 ## Current Status
 
 Working:
@@ -345,6 +402,7 @@ Working:
 10. FastAPI document upload and index-management endpoints with safe upload validation and automatic engine reload.
 11. Dockerized FastAPI deployment with Compose, healthcheck, mounted data/traces/outputs, and Makefile targets.
 12. OpenTelemetry-shaped trace export for JSONL spans/events, with CLI support for service name, trace ID filtering, limits, and JSON/text summaries.
+13. Production API hardening with request ID propagation, structured JSON errors, validation handlers, rate-limit headers, and in-memory rate limiting.
 
 Next improvements:
 
@@ -359,6 +417,7 @@ Next improvements:
 The RAG engine does not care which transport calls it. That makes local evals, HTTP requests, MCP tool calls, A2A tasks, and live voice turns share one behavior.
 
 The current local voice demo uses microphone input and local speaker output. LiveKit room transport is the main remaining production transport layer.
+
 
 
 
