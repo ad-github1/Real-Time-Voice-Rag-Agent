@@ -82,6 +82,16 @@ Run evals:
 PYTHONPATH=src python3 -m voice_rag_agent.cli eval
 ```
 
+Add this:
+
+```md
+Summarize latency metrics from trace files:
+
+```bash
+PYTHONPATH=src python3 -m voice_rag_agent.cli metrics
+PYTHONPATH=src python3 -m voice_rag_agent.cli metrics --mode voice
+PYTHONPATH=src python3 -m voice_rag_agent.cli metrics --json
+
 Run the HTTP API after installing the API extra:
 
 ```bash
@@ -174,6 +184,7 @@ Working:
 5. MCP and A2A protocol surfaces.
 6. FastAPI query and streaming endpoints.
 7. PDF, DOCX, HTML/HTM, and URL ingestion support.
+8. Latency metrics report CLI with avg, p50, p95, min, and max summaries.
 
 Next improvements:
 
@@ -188,3 +199,4 @@ Next improvements:
 The RAG engine does not care which transport calls it. That makes local evals, HTTP requests, MCP tool calls, A2A tasks, and live voice turns share one behavior.
 
 The current local voice demo uses microphone input and local speaker output. LiveKit room transport is the main remaining production transport layer.
+

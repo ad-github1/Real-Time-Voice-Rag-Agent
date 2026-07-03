@@ -11,6 +11,7 @@ from .config import Settings
 from .evals import run_eval
 from .events import async_events_to_ndjson
 from .llm import build_reasoner
+from .metrics import format_metrics_report, report_to_dict, summarize_metrics
 from .rag.engine import build_engine
 from .voice.asr import AssemblyAITranscriptSource, IterableTranscriptSource
 from .voice.audio_sink import FfplayPCMFloat32Sink
@@ -29,6 +30,8 @@ def main(argv: list[str] | None = None) -> int:
         return _voice_demo(settings, args.utterance)
     if args.command == "voice-live":
         return _voice_live(settings, args.tts)
+    if args.command == "metrics":
+        return _metrics(settings, mode=args.mode, limit=args.limit, json_output=args.json)
     if args.command == "eval":
         return _eval(settings, Path(args.cases), Path(args.output) if args.output else None)
     if args.command == "serve":
@@ -47,6 +50,7 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--root", default=str(Path.cwd()), help="Project root directory.")
     parser.add_argument("--data-dir", default=None, help="Document directory to index.")
     parser.add_argument("--reasoner", default=None, help="template, ollama, or openai.")
+
     subparsers = parser.add_subparsers(dest="command", required=True)
 
     query = subparsers.add_parser("query", help="Ask a question against the document corpus.")
@@ -59,11 +63,26 @@ def _build_parser() -> argparse.ArgumentParser:
 
     live_voice = subparsers.add_parser("voice-live", help="Run one real microphone voice RAG turn.")
     live_voice.add_argument(
-    "--tts",
-    choices=["console", "cartesia"],
-    default="cartesia",
-    help="TTS backend for the live demo.",
+        "--tts",
+        choices=["console", "cartesia"],
+        default="cartesia",
+        help="TTS backend for the live demo.",
     )
+
+    metrics = subparsers.add_parser("metrics", help="Summarize latency metrics from trace files.")
+    metrics.add_argument(
+        "--mode",
+        choices=["all", "text", "voice"],
+        default="all",
+        help="Filter metrics by event mode.",
+    )
+    metrics.add_argument(
+        "--limit",
+        type=int,
+        default=None,
+        help="Only summarize the most recent N metric events.",
+    )
+    metrics.add_argument("--json", action="store_true", help="Emit metrics report as JSON.")
 
     eval_parser = subparsers.add_parser("eval", help="Run grounding checks.")
     eval_parser.add_argument("--cases", default="tests/fixtures/eval_cases.json")
@@ -78,16 +97,20 @@ def _build_parser() -> argparse.ArgumentParser:
     a2a.add_argument("--port", type=int, default=8010)
 
     subparsers.add_parser("mcp", help="Run the MCP stdio server.")
+
     return parser
 
 
 def _settings_from_args(args: argparse.Namespace) -> Settings:
     settings = Settings.from_env(Path(args.root))
+
     if args.data_dir:
         path = Path(args.data_dir)
         settings = _replace(settings, data_dir=path if path.is_absolute() else settings.root_dir / path)
+
     if args.reasoner:
         settings = _replace(settings, reasoner=args.reasoner)
+
     return settings
 
 
@@ -103,7 +126,9 @@ def _engine(settings: Settings):
 
 def _query(settings: Settings, query: str, stream: bool, json_output: bool) -> int:
     engine = _engine(settings)
+
     if stream:
+
         async def run_stream() -> None:
             async for line in async_events_to_ndjson(engine.stream_query(query)):
                 print(line, end="")
@@ -112,14 +137,17 @@ def _query(settings: Settings, query: str, stream: bool, json_output: bool) -> i
         return 0
 
     answer = asyncio.run(engine.query(query))
+
     if json_output:
         print(json.dumps({"answer": answer.text, "citations": answer.citations}, indent=2))
     else:
         print(answer.text)
+
         if answer.citations:
             print("\nCitations:")
             for citation in answer.citations:
                 print(f"- {citation['title']} ({citation['path']}) score={citation['score']}")
+
     return 0
 
 
@@ -133,6 +161,7 @@ def _voice_demo(settings: Settings, utterance: str) -> int:
 
     asyncio.run(run_pipeline())
     return 0
+
 
 def _voice_live(settings: Settings, tts_backend: str) -> int:
     engine = _engine(settings)
@@ -175,15 +204,34 @@ def _voice_live(settings: Settings, tts_backend: str) -> int:
     return 0
 
 
+def _metrics(settings: Settings, mode: str, limit: int | None, json_output: bool) -> int:
+    report = summarize_metrics(settings.trace_dir, mode=mode, limit=limit)
+
+    if json_output:
+        print(json.dumps(report_to_dict(report), indent=2))
+    else:
+        print(format_metrics_report(report))
+
+    return 0
+
+
 def _eval(settings: Settings, cases: Path, output: Path | None) -> int:
-    results = run_eval(_engine(settings), settings.root_dir / cases, settings.root_dir / output if output else None)
+    results = run_eval(
+        _engine(settings),
+        settings.root_dir / cases,
+        settings.root_dir / output if output else None,
+    )
+
     passed = sum(1 for result in results if result.passed)
     print(f"{passed}/{len(results)} evals passed")
+
     for result in results:
         status = "PASS" if result.passed else "FAIL"
         print(f"{status} {result.case_id}: citations={result.citation_count}")
+
         if result.missing_terms:
             print(f"  missing: {', '.join(result.missing_terms)}")
+
     return 0 if passed == len(results) else 1
 
 
@@ -193,6 +241,7 @@ def _serve(settings: Settings, host: str, port: int) -> int:
     except ImportError:
         print("Install the api extra to run the server: pip install -e '.[api]'", file=sys.stderr)
         return 1
+
     from .api import create_app
 
     uvicorn.run(create_app(settings), host=host, port=port, reload=False)
@@ -205,6 +254,7 @@ def _a2a(settings: Settings, host: str, port: int) -> int:
     except ImportError:
         print("Install the api extra to run the A2A server: pip install -e '.[api]'", file=sys.stderr)
         return 1
+
     from .protocols.a2a import create_a2a_app
 
     uvicorn.run(create_a2a_app(settings), host=host, port=port, reload=False)
