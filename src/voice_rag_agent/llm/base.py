@@ -2,9 +2,10 @@ from __future__ import annotations
 
 import asyncio
 import re
-from typing import AsyncIterator, Protocol
+from typing import TYPE_CHECKING, AsyncIterator, Protocol
 
-from voice_rag_agent.rag.retriever import RetrievedChunk
+if TYPE_CHECKING:
+    from voice_rag_agent.rag.retriever import RetrievedChunk
 
 
 class Reasoner(Protocol):
