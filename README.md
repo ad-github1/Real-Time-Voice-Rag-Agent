@@ -47,6 +47,7 @@ The live demo uses:
 - Runs a real local voice path with AssemblyAI ASR and Cartesia TTS.
 - Keeps ASR, retrieval, reasoning, TTS, tracing, and transport as separate adapters.
 - Records trace JSONL files for latency analysis and eval debugging.
+- Ingests Markdown, plain text, PDF, DOCX, HTML/HTM, and web URLs from `urls.txt`.
 
 ## Quick Start
 
@@ -172,11 +173,12 @@ Working:
 4. Real local voice demo with AssemblyAI ASR, Ollama/Gemma reasoning, and Cartesia TTS.
 5. MCP and A2A protocol surfaces.
 6. FastAPI query and streaming endpoints.
+7. PDF, DOCX, HTML, and URL ingestion support.
 
 Next improvements:
 
 1. Complete `integrations/livekit_worker.py` for real LiveKit room transport.
-2. Add PDF, DOCX, and web document ingestion.
+2. Add production-grade ingestion controls: file upload API, metadata filters, duplicate detection, and persistent indexes.
 3. Promote LlamaIndex or hybrid retrieval as a first-class production retrieval option.
 4. Add richer latency metrics for ASR, retrieval, LLM time-to-first-token, TTS first-audio, and full turn latency.
 5. Export traces to OpenTelemetry if the `observability` extra is installed.
