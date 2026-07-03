@@ -42,12 +42,12 @@ The live demo uses:
 
 - Streams one JSON event envelope across CLI, HTTP, A2A, MCP, and voice transports.
 - Retrieves grounded chunks from local documents with deterministic BM25 for tests.
+- Ingests Markdown, plain text, PDF, DOCX, HTML/HTM, and web URLs from `urls.txt`.
 - Supports optional LlamaIndex retrieval for production vector or hybrid search.
 - Streams model deltas from Ollama's local JSON API or OpenAI's Responses API.
 - Runs a real local voice path with AssemblyAI ASR and Cartesia TTS.
 - Keeps ASR, retrieval, reasoning, TTS, tracing, and transport as separate adapters.
 - Records trace JSONL files for latency analysis and eval debugging.
-- Ingests Markdown, plain text, PDF, DOCX, HTML/HTM, and web URLs from `urls.txt`.
 
 ## Quick Start
 
@@ -123,7 +123,7 @@ For the real voice demo:
 ```bash
 ASSEMBLYAI_API_KEY=...
 CARTESIA_API_KEY=...
-CARTESIA_VOICE_ID=db6b0ed5-d5d3-463d-ae85-518a07d3c2b4
+CARTESIA_VOICE_ID=f786b574-daa5-4673-aa0c-cbe3e8534c02
 VOICE_RAG_REASONER=ollama
 OLLAMA_MODEL=gemma3:4b
 ```
@@ -173,7 +173,7 @@ Working:
 4. Real local voice demo with AssemblyAI ASR, Ollama/Gemma reasoning, and Cartesia TTS.
 5. MCP and A2A protocol surfaces.
 6. FastAPI query and streaming endpoints.
-7. PDF, DOCX, HTML, and URL ingestion support.
+7. PDF, DOCX, HTML/HTM, and URL ingestion support.
 
 Next improvements:
 
