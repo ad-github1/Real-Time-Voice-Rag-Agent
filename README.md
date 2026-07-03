@@ -202,8 +202,50 @@ Run generation with a selected retriever:
 PYTHONPATH=src python3 -m voice_rag_agent.cli query "What file types are supported for ingestion?" --retriever bm25 --stream
 PYTHONPATH=src python3 -m voice_rag_agent.cli query "What file types are supported for ingestion?" --retriever hybrid --stream
 ```
-
 Hybrid retrieval combines BM25 lexical scoring with lightweight semantic similarity and score fusion. Diagnostics include BM25 score, semantic score, normalized scores, and final fused score.
+
+## Document Upload API
+
+The FastAPI server supports document upload and index management endpoints.
+
+Start the API server:
+
+```bash
+PYTHONPATH=src python3 -m voice_rag_agent.cli serve
+```
+
+Check API health:
+
+```bash
+curl http://127.0.0.1:8000/health
+```
+
+List indexed documents:
+
+```bash
+curl http://127.0.0.1:8000/documents
+```
+
+Upload a document and rebuild the persistent index automatically:
+
+```bash
+curl -X POST "http://127.0.0.1:8000/documents/upload?rebuild=true" \
+  -F "file=@/path/to/document.md"
+```
+
+Check index stats:
+
+```bash
+curl http://127.0.0.1:8000/index/stats
+```
+
+Manually rebuild the index:
+
+```bash
+curl -X POST http://127.0.0.1:8000/index/rebuild
+```
+
+The upload API validates supported file types, sanitizes filenames, applies an upload size limit, saves files under the configured data directory, rebuilds the persistent index, and reloads the RAG engine.
 
 ## Current Status
 
@@ -218,6 +260,7 @@ Working:
 7. PDF, DOCX, HTML/HTM, and URL ingestion support.
 8. Latency metrics report CLI with avg, p50, p95, min, and max summaries.
 9. Hybrid retrieval with BM25, lightweight semantic similarity, score fusion, and JSON diagnostics.
+10. FastAPI document upload and index-management endpoints with safe upload validation and automatic engine reload.
 
 Next improvements:
 
@@ -232,5 +275,6 @@ Next improvements:
 The RAG engine does not care which transport calls it. That makes local evals, HTTP requests, MCP tool calls, A2A tasks, and live voice turns share one behavior.
 
 The current local voice demo uses microphone input and local speaker output. LiveKit room transport is the main remaining production transport layer.
+
 
 
