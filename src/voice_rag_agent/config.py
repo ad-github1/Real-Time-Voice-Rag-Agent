@@ -7,21 +7,26 @@ from pathlib import Path
 
 def _env_bool(name: str, default: bool) -> bool:
     raw = os.getenv(name)
+
     if raw is None:
         return default
+
     return raw.strip().lower() in {"1", "true", "yes", "on"}
 
 
 def _env_int(name: str, default: int) -> int:
     raw = os.getenv(name)
+
     if raw is None or raw.strip() == "":
         return default
+
     return int(raw)
 
 
 def _env_path(name: str, default: Path, root: Path) -> Path:
     raw = os.getenv(name)
     path = Path(raw) if raw else default
+
     return path if path.is_absolute() else root / path
 
 
@@ -33,6 +38,7 @@ class Settings:
     env: str
     data_dir: Path
     trace_dir: Path
+    index_dir: Path
     chunk_size: int
     chunk_overlap: int
     top_k: int
@@ -53,11 +59,13 @@ class Settings:
     @classmethod
     def from_env(cls, root_dir: Path | None = None) -> "Settings":
         root = (root_dir or Path(os.getenv("VOICE_RAG_ROOT", Path.cwd()))).resolve()
+
         return cls(
             root_dir=root,
             env=os.getenv("VOICE_RAG_ENV", "local"),
             data_dir=_env_path("VOICE_RAG_DATA_DIR", Path("data/sample_docs"), root),
             trace_dir=_env_path("VOICE_RAG_TRACE_DIR", Path("traces"), root),
+            index_dir=_env_path("VOICE_RAG_INDEX_DIR", Path("data/index_cache"), root),
             chunk_size=_env_int("VOICE_RAG_CHUNK_SIZE", 900),
             chunk_overlap=_env_int("VOICE_RAG_CHUNK_OVERLAP", 120),
             top_k=_env_int("VOICE_RAG_TOP_K", 4),
@@ -79,3 +87,4 @@ class Settings:
     def ensure_dirs(self) -> None:
         self.data_dir.mkdir(parents=True, exist_ok=True)
         self.trace_dir.mkdir(parents=True, exist_ok=True)
+        self.index_dir.mkdir(parents=True, exist_ok=True)
