@@ -45,6 +45,7 @@ class Settings:
     max_cache_entries: int
     enable_tracing: bool
     reasoner: str
+    retriever: str
     ollama_base_url: str
     ollama_model: str
     openai_api_key: str
@@ -72,6 +73,7 @@ class Settings:
             max_cache_entries=_env_int("VOICE_RAG_MAX_CACHE_ENTRIES", 128),
             enable_tracing=_env_bool("VOICE_RAG_ENABLE_TRACING", True),
             reasoner=os.getenv("VOICE_RAG_REASONER", "template"),
+            retriever=os.getenv("VOICE_RAG_RETRIEVER", "bm25"),
             ollama_base_url=os.getenv("OLLAMA_BASE_URL", "http://localhost:11434"),
             ollama_model=os.getenv("OLLAMA_MODEL", "gemma3:4b"),
             openai_api_key=os.getenv("OPENAI_API_KEY", ""),
