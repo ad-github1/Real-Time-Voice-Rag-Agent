@@ -13,6 +13,11 @@ from .evals import run_eval
 from .events import async_events_to_ndjson
 from .llm import build_reasoner
 from .metrics import format_metrics_report, report_to_dict, summarize_metrics
+from .trace_export import (
+    export_traces_to_otel_json,
+    format_trace_export_summary,
+    result_to_dict as trace_export_result_to_dict,
+)
 from .rag.engine import build_engine
 from .rag.index_store import (
     build_persistent_index,
@@ -42,6 +47,16 @@ def main(argv: list[str] | None = None) -> int:
         return _voice_live(settings, args.tts)
     if args.command == "metrics":
         return _metrics(settings, mode=args.mode, limit=args.limit, json_output=args.json)
+    if args.command == "traces":
+        return _traces(
+            settings,
+            action=args.traces_action,
+            output=Path(args.output),
+            service_name=args.service_name,
+            trace_id=args.trace_id,
+            limit=args.limit,
+            json_output=args.json,
+        )
     if args.command == "index":
         return _index(settings, action=args.index_action, json_output=args.json)
     if args.command == "eval":
@@ -112,6 +127,36 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Only summarize the most recent N metric events.",
     )
     metrics.add_argument("--json", action="store_true", help="Emit metrics report as JSON.")
+
+    traces = subparsers.add_parser("traces", help="Manage and export trace files.")
+    traces_subparsers = traces.add_subparsers(dest="traces_action", required=True)
+
+    traces_export = traces_subparsers.add_parser(
+        "export",
+        help="Export JSONL traces to OpenTelemetry-shaped JSON.",
+    )
+    traces_export.add_argument(
+        "--output",
+        default="outputs/otel_traces.json",
+        help="Output JSON file.",
+    )
+    traces_export.add_argument(
+        "--service-name",
+        default="voice-rag-agent",
+        help="OpenTelemetry service.name value.",
+    )
+    traces_export.add_argument(
+        "--trace-id",
+        default=None,
+        help="Only export one trace ID.",
+    )
+    traces_export.add_argument(
+        "--limit",
+        type=int,
+        default=None,
+        help="Only export the most recent N trace records.",
+    )
+    traces_export.add_argument("--json", action="store_true", help="Emit export summary as JSON.")
 
     index = subparsers.add_parser("index", help="Manage persistent retrieval index.")
     index_subparsers = index.add_subparsers(dest="index_action", required=True)
@@ -304,6 +349,37 @@ def _metrics(settings: Settings, mode: str, limit: int | None, json_output: bool
         print(format_metrics_report(report))
 
     return 0
+
+
+def _traces(
+    settings: Settings,
+    action: str,
+    output: Path,
+    service_name: str,
+    trace_id: str | None,
+    limit: int | None,
+    json_output: bool,
+) -> int:
+    if action == "export":
+        output_path = output if output.is_absolute() else settings.root_dir / output
+        result = export_traces_to_otel_json(
+            trace_dir=settings.trace_dir,
+            output_path=output_path,
+            service_name=service_name,
+            trace_id=trace_id,
+            limit=limit,
+        )
+
+        if json_output:
+            print(json.dumps(trace_export_result_to_dict(result), indent=2))
+        else:
+            print(format_trace_export_summary(result))
+
+        return 0
+
+    print(f"Unknown traces action: {action}", file=sys.stderr)
+
+    return 2
 
 
 def _index(settings: Settings, action: str, json_output: bool) -> int:
