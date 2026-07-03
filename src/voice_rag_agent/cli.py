@@ -4,6 +4,7 @@ import argparse
 import asyncio
 import json
 import os
+import re
 import sys
 from pathlib import Path
 
@@ -19,6 +20,7 @@ from .rag.index_store import (
     format_index_stats,
     index_stats,
 )
+from .rag.retriever import RetrievedChunk
 from .voice.asr import AssemblyAITranscriptSource, IterableTranscriptSource
 from .voice.audio_sink import FfplayPCMFloat32Sink
 from .voice.pipeline import VoiceRagPipeline
@@ -32,6 +34,8 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.command == "query":
         return _query(settings, args.query, stream=args.stream, json_output=args.json)
+    if args.command == "retrieve":
+        return _retrieve(settings, args.query, top_k=args.top_k, json_output=args.json)
     if args.command == "voice-demo":
         return _voice_demo(settings, args.utterance)
     if args.command == "voice-live":
@@ -65,6 +69,23 @@ def _build_parser() -> argparse.ArgumentParser:
     query.add_argument("query")
     query.add_argument("--stream", action="store_true", help="Emit event NDJSON.")
     query.add_argument("--json", action="store_true", help="Emit a single JSON answer object.")
+    query.add_argument(
+        "--retriever",
+        choices=["bm25", "hybrid"],
+        default=None,
+        help="Retrieval mode for this query.",
+    )
+
+    retrieve = subparsers.add_parser("retrieve", help="Inspect retrieved chunks without generation.")
+    retrieve.add_argument("query")
+    retrieve.add_argument("--top-k", type=int, default=None, help="Number of chunks to retrieve.")
+    retrieve.add_argument("--json", action="store_true", help="Emit retrieval diagnostics as JSON.")
+    retrieve.add_argument(
+        "--retriever",
+        choices=["bm25", "hybrid"],
+        default=None,
+        help="Retrieval mode for diagnostics.",
+    )
 
     voice = subparsers.add_parser("voice-demo", help="Simulate a final ASR utterance.")
     voice.add_argument("utterance")
@@ -131,6 +152,11 @@ def _settings_from_args(args: argparse.Namespace) -> Settings:
     if args.reasoner:
         settings = _replace(settings, reasoner=args.reasoner)
 
+    retriever = getattr(args, "retriever", None)
+
+    if retriever:
+        settings = _replace(settings, retriever=retriever)
+
     return settings
 
 
@@ -168,6 +194,50 @@ def _query(settings: Settings, query: str, stream: bool, json_output: bool) -> i
             print("\nCitations:")
             for citation in answer.citations:
                 print(f"- {citation['title']} ({citation['path']}) score={citation['score']}")
+
+    return 0
+
+
+def _retrieve(settings: Settings, query: str, top_k: int | None, json_output: bool) -> int:
+    if top_k is not None:
+        settings = _replace(settings, top_k=top_k)
+
+    engine = _engine(settings)
+    results = engine.retrieve(query, top_k=settings.top_k)
+    payload = {
+        "query": query,
+        "retriever": settings.retriever,
+        "top_k": settings.top_k,
+        "results": [_retrieved_chunk_to_dict(index + 1, result) for index, result in enumerate(results)],
+    }
+
+    if json_output:
+        print(json.dumps(payload, indent=2))
+        return 0
+
+    print(f"Retriever: {settings.retriever}")
+    print(f"Query: {query}")
+    print(f"Results: {len(results)}")
+    print("")
+
+    for index, result in enumerate(results, start=1):
+        citation = result.citation()
+        print(f"{index}. {citation.get('title', '')}")
+        print(f"   Score: {citation.get('score')}")
+        print(f"   Path: {citation.get('path')}")
+        print(f"   Chunk: {citation.get('chunk_index')}")
+        print(f"   Preview: {_preview_text(result.chunk.text)}")
+
+        diagnostics = result.diagnostics or {}
+
+        if diagnostics:
+            diag_text = ", ".join(
+                f"{key}={_format_diag(value)}"
+                for key, value in diagnostics.items()
+            )
+            print(f"   Diagnostics: {diag_text}")
+
+        print("")
 
     return 0
 
@@ -349,6 +419,34 @@ def _mcp(settings: Settings) -> int:
     run_stdio(settings)
 
     return 0
+
+
+def _retrieved_chunk_to_dict(rank: int, result: RetrievedChunk) -> dict[str, object]:
+    citation = result.citation()
+
+    return {
+        "rank": rank,
+        "id": citation.get("id", ""),
+        "title": citation.get("title", ""),
+        "path": citation.get("path", ""),
+        "chunk_index": citation.get("chunk_index", 0),
+        "score": citation.get("score", 0),
+        "diagnostics": result.diagnostics or {},
+        "preview": _preview_text(result.chunk.text),
+    }
+
+
+def _preview_text(text: str, max_chars: int = 260) -> str:
+    compact = re.sub(r"\s+", " ", text).strip()
+
+    return compact if len(compact) <= max_chars else f"{compact[: max_chars - 3]}..."
+
+
+def _format_diag(value: object) -> str:
+    if isinstance(value, float):
+        return f"{value:.4f}"
+
+    return str(value)
 
 
 if __name__ == "__main__":

@@ -14,7 +14,7 @@ from voice_rag_agent.observability import TraceRecorder
 from .documents import load_documents
 from .index_store import load_index_if_valid
 from .prompts import build_grounded_prompt
-from .retriever import BM25Retriever, CachedRetriever, Retriever
+from .retriever import CachedRetriever, RetrievedChunk, Retriever, build_retriever
 
 
 @dataclass(frozen=True)
@@ -31,11 +31,13 @@ class RagEngine:
         reasoner: Reasoner,
         tracer: TraceRecorder,
         top_k: int = 4,
+        retriever_name: str = "bm25",
     ) -> None:
         self.retriever = retriever
         self.reasoner = reasoner
         self.tracer = tracer
         self.top_k = top_k
+        self.retriever_name = retriever_name
 
     async def stream_query(self, query: str, trace_id: str | None = None) -> AsyncIterator[RagEvent]:
         trace_id = trace_id or new_trace_id()
@@ -46,7 +48,13 @@ class RagEngine:
 
         retrieval_started_ns = time.perf_counter_ns()
 
-        with self.tracer.span(trace_id, "retrieval", query=query, top_k=self.top_k):
+        with self.tracer.span(
+            trace_id,
+            "retrieval",
+            query=query,
+            top_k=self.top_k,
+            retriever=self.retriever_name,
+        ):
             results = self.retriever.retrieve(query, self.top_k)
 
         retrieval_latency_ms = _elapsed_ms(retrieval_started_ns)
@@ -56,6 +64,7 @@ class RagEngine:
             trace_id,
             {
                 "count": len(results),
+                "retriever": self.retriever_name,
                 "citations": [result.citation() for result in results],
                 "retrieval_latency_ms": retrieval_latency_ms,
             },
@@ -99,6 +108,7 @@ class RagEngine:
                 "text": answer_text,
                 "citations": [result.citation() for result in results],
                 "grounded": bool(results),
+                "retriever": self.retriever_name,
                 "retrieval_latency_ms": retrieval_latency_ms,
                 "llm_time_to_first_token_ms": llm_time_to_first_token_ms,
                 "llm_total_latency_ms": llm_total_latency_ms,
@@ -111,6 +121,7 @@ class RagEngine:
             trace_id,
             {
                 "mode": "text",
+                "retriever": self.retriever_name,
                 "retrieval_latency_ms": retrieval_latency_ms,
                 "llm_time_to_first_token_ms": llm_time_to_first_token_ms,
                 "llm_total_latency_ms": llm_total_latency_ms,
@@ -133,6 +144,11 @@ class RagEngine:
 
         return RagAnswer(text=answer, citations=citations, trace_id=last_trace_id)
 
+    def retrieve(self, query: str, top_k: int | None = None) -> list[RetrievedChunk]:
+        normalized_query = _normalize_query(query)
+
+        return self.retriever.retrieve(normalized_query, top_k or self.top_k)
+
     def _event(self, event_type: str, trace_id: str, payload: dict[str, object]) -> RagEvent:
         event = RagEvent(type=event_type, trace_id=trace_id, payload=payload)
         self.tracer.write_event(event)
@@ -154,7 +170,7 @@ def build_engine(settings: Settings, reasoner: Reasoner | None = None) -> RagEng
         chunks = load_documents(settings.data_dir, settings.chunk_size, settings.chunk_overlap)
 
     retriever = CachedRetriever(
-        BM25Retriever(chunks),
+        build_retriever(chunks, settings.retriever),
         max_entries=settings.max_cache_entries,
     )
 
@@ -165,6 +181,7 @@ def build_engine(settings: Settings, reasoner: Reasoner | None = None) -> RagEng
         reasoner=reasoner or TemplateReasoner(),
         tracer=tracer,
         top_k=settings.top_k,
+        retriever_name=settings.retriever,
     )
 
 
