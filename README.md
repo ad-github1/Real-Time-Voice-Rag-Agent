@@ -42,6 +42,7 @@ The live demo uses:
 
 - Streams one JSON event envelope across CLI, HTTP, A2A, MCP, and voice transports.
 - Retrieves grounded chunks from local documents with deterministic BM25 for tests.
+- Ingests Markdown, plain text, PDF, DOCX, HTML/HTM, and web URLs from `urls.txt`.
 - Supports optional LlamaIndex retrieval for production vector or hybrid search.
 - Streams model deltas from Ollama's local JSON API or OpenAI's Responses API.
 - Runs a real local voice path with AssemblyAI ASR and Cartesia TTS.
@@ -172,11 +173,12 @@ Working:
 4. Real local voice demo with AssemblyAI ASR, Ollama/Gemma reasoning, and Cartesia TTS.
 5. MCP and A2A protocol surfaces.
 6. FastAPI query and streaming endpoints.
+7. PDF, DOCX, HTML/HTM, and URL ingestion support.
 
 Next improvements:
 
 1. Complete `integrations/livekit_worker.py` for real LiveKit room transport.
-2. Add PDF, DOCX, and web document ingestion.
+2. Add production-grade ingestion controls: file upload API, metadata filters, duplicate detection, and persistent indexes.
 3. Promote LlamaIndex or hybrid retrieval as a first-class production retrieval option.
 4. Add richer latency metrics for ASR, retrieval, LLM time-to-first-token, TTS first-audio, and full turn latency.
 5. Export traces to OpenTelemetry if the `observability` extra is installed.
