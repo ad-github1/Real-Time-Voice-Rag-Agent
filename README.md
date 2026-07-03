@@ -285,6 +285,50 @@ docker compose down
 
 The Docker setup mounts local `data/`, `traces/`, and `outputs/` directories, keeps `.env` out of the image, and exposes the FastAPI server on port `8000`.
 
+## OpenTelemetry Trace Export
+
+The project records local JSONL traces for RAG events and spans. These traces can be exported into an OpenTelemetry-shaped JSON payload for observability workflows.
+
+Run a streamed query to generate trace events:
+
+```bash
+PYTHONPATH=src python3 -m voice_rag_agent.cli query "How does the agent keep latency low?" --stream
+```
+
+Export traces:
+
+```bash
+PYTHONPATH=src python3 -m voice_rag_agent.cli traces export
+```
+
+Export with JSON summary:
+
+```bash
+PYTHONPATH=src python3 -m voice_rag_agent.cli traces export --json
+```
+
+Export to a custom path:
+
+```bash
+PYTHONPATH=src python3 -m voice_rag_agent.cli traces export \
+  --output outputs/custom_otel_traces.json
+```
+
+Export only one trace:
+
+```bash
+PYTHONPATH=src python3 -m voice_rag_agent.cli traces export \
+  --trace-id <trace_id>
+```
+
+The exported file is written by default to:
+
+```text
+outputs/otel_traces.json
+```
+
+The exporter converts existing JSONL span/event records into OpenTelemetry-style `resourceSpans`, preserving trace IDs, span IDs, event payloads, attributes, service name, and export summary metadata.
+
 ## Current Status
 
 Working:
@@ -300,6 +344,7 @@ Working:
 9. Hybrid retrieval with BM25, lightweight semantic similarity, score fusion, and JSON diagnostics.
 10. FastAPI document upload and index-management endpoints with safe upload validation and automatic engine reload.
 11. Dockerized FastAPI deployment with Compose, healthcheck, mounted data/traces/outputs, and Makefile targets.
+12. OpenTelemetry-shaped trace export for JSONL spans/events, with CLI support for service name, trace ID filtering, limits, and JSON/text summaries.
 
 Next improvements:
 
@@ -314,6 +359,8 @@ Next improvements:
 The RAG engine does not care which transport calls it. That makes local evals, HTTP requests, MCP tool calls, A2A tasks, and live voice turns share one behavior.
 
 The current local voice demo uses microphone input and local speaker output. LiveKit room transport is the main remaining production transport layer.
+
+
 
 
 
