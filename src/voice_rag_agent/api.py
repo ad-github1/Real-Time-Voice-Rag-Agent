@@ -1,14 +1,19 @@
 from __future__ import annotations
 
 import hashlib
+import os
 import re
 import time
+import uuid
+from collections import defaultdict, deque
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
 try:
-    from fastapi import FastAPI, File, HTTPException, UploadFile
-    from fastapi.responses import StreamingResponse
+    from fastapi import FastAPI, File, HTTPException, Request, UploadFile
+    from fastapi.exceptions import RequestValidationError
+    from fastapi.responses import JSONResponse, StreamingResponse
     from pydantic import BaseModel
 except ImportError as exc:
     raise RuntimeError("Install the api extra to run the FastAPI server.") from exc
@@ -23,11 +28,56 @@ from .rag.index_store import build_persistent_index, index_stats
 
 MAX_UPLOAD_BYTES = 15 * 1024 * 1024
 UPLOAD_SUBDIR = "api_uploads"
+REQUEST_ID_HEADER = "X-Request-ID"
+RATE_LIMIT_HEADER = "X-RateLimit-Limit"
+RATE_LIMIT_REMAINING_HEADER = "X-RateLimit-Remaining"
+RATE_LIMIT_RESET_HEADER = "X-RateLimit-Reset"
 
 
 class QueryRequest(BaseModel):
     query: str
     trace_id: str | None = None
+
+
+@dataclass(frozen=True)
+class RateLimitDecision:
+    allowed: bool
+    limit: int
+    remaining: int
+    reset_seconds: int
+
+
+class InMemoryRateLimiter:
+    def __init__(self, max_requests: int = 120, window_seconds: int = 60) -> None:
+        self.max_requests = max_requests
+        self.window_seconds = window_seconds
+        self._buckets: dict[str, deque[float]] = defaultdict(deque)
+
+    def check(self, key: str, now: float | None = None) -> RateLimitDecision:
+        current = time.monotonic() if now is None else now
+        bucket = self._buckets[key]
+        cutoff = current - self.window_seconds
+
+        while bucket and bucket[0] <= cutoff:
+            bucket.popleft()
+
+        if len(bucket) >= self.max_requests:
+            reset_seconds = max(1, int(bucket[0] + self.window_seconds - current))
+            return RateLimitDecision(
+                allowed=False,
+                limit=self.max_requests,
+                remaining=0,
+                reset_seconds=reset_seconds,
+            )
+
+        bucket.append(current)
+
+        return RateLimitDecision(
+            allowed=True,
+            limit=self.max_requests,
+            remaining=max(0, self.max_requests - len(bucket)),
+            reset_seconds=self.window_seconds,
+        )
 
 
 def create_app(settings: Settings | None = None) -> Any:
@@ -45,6 +95,78 @@ def create_app(settings: Settings | None = None) -> Any:
         engine_holder["engine"] = build_engine(resolved, reasoner=build_reasoner(resolved))
 
     app = FastAPI(title="Real-Time Voice RAG Agent", version="0.1.0")
+    app.state.rate_limiter = InMemoryRateLimiter(
+        max_requests=_env_int("VOICE_RAG_API_RATE_LIMIT_REQUESTS", 120),
+        window_seconds=_env_int("VOICE_RAG_API_RATE_LIMIT_WINDOW_SECONDS", 60),
+    )
+
+    @app.middleware("http")
+    async def request_context_middleware(request: Request, call_next: Any) -> Any:
+        request_id = request.headers.get(REQUEST_ID_HEADER) or uuid.uuid4().hex
+        request.state.request_id = request_id
+
+        client_key = _client_key(request)
+        decision = app.state.rate_limiter.check(client_key)
+
+        if not decision.allowed:
+            return _rate_limit_response(request_id, decision)
+
+        response = await call_next(request)
+        _set_common_headers(response.headers, request_id, decision)
+
+        return response
+
+    @app.exception_handler(HTTPException)
+    async def http_exception_handler(request: Request, exc: HTTPException) -> JSONResponse:
+        request_id = _request_id(request)
+        message = str(exc.detail)
+        code = _status_code_to_error_code(exc.status_code)
+
+        return JSONResponse(
+            status_code=exc.status_code,
+            content=_error_payload(
+                code=code,
+                message=message,
+                request_id=request_id,
+                status_code=exc.status_code,
+                detail=message,
+            ),
+            headers=dict(exc.headers or {}),
+        )
+
+    @app.exception_handler(RequestValidationError)
+    async def validation_exception_handler(
+        request: Request,
+        exc: RequestValidationError,
+    ) -> JSONResponse:
+        request_id = _request_id(request)
+
+        return JSONResponse(
+            status_code=422,
+            content=_error_payload(
+                code="validation_error",
+                message="Request validation failed.",
+                request_id=request_id,
+                status_code=422,
+                detail="Request validation failed.",
+                details=exc.errors(),
+            ),
+        )
+
+    @app.exception_handler(Exception)
+    async def unhandled_exception_handler(request: Request, exc: Exception) -> JSONResponse:
+        request_id = _request_id(request)
+
+        return JSONResponse(
+            status_code=500,
+            content=_error_payload(
+                code="internal_server_error",
+                message="Internal server error.",
+                request_id=request_id,
+                status_code=500,
+                detail="Internal server error.",
+            ),
+        )
 
     @app.get("/health")
     async def health() -> dict[str, str | int]:
@@ -230,6 +352,111 @@ def _index_build_payload(result: Any) -> dict[str, Any]:
         "created_at_ms": result.created_at_ms,
         "created_at_iso": _iso_from_ms(result.created_at_ms),
     }
+
+
+def _rate_limit_response(request_id: str, decision: RateLimitDecision) -> JSONResponse:
+    response = JSONResponse(
+        status_code=429,
+        content=_error_payload(
+            code="rate_limit_exceeded",
+            message="Too many requests. Please retry later.",
+            request_id=request_id,
+            status_code=429,
+            detail="Too many requests. Please retry later.",
+        ),
+    )
+    _set_common_headers(response.headers, request_id, decision)
+
+    return response
+
+
+def _set_common_headers(
+    headers: Any,
+    request_id: str,
+    decision: RateLimitDecision,
+) -> None:
+    headers[REQUEST_ID_HEADER] = request_id
+    headers[RATE_LIMIT_HEADER] = str(decision.limit)
+    headers[RATE_LIMIT_REMAINING_HEADER] = str(decision.remaining)
+    headers[RATE_LIMIT_RESET_HEADER] = str(decision.reset_seconds)
+
+
+def _error_payload(
+    *,
+    code: str,
+    message: str,
+    request_id: str,
+    status_code: int,
+    detail: str,
+    details: Any | None = None,
+) -> dict[str, Any]:
+    error: dict[str, Any] = {
+        "code": code,
+        "message": message,
+        "request_id": request_id,
+        "status_code": status_code,
+    }
+
+    if details is not None:
+        error["details"] = details
+
+    return {
+        "detail": detail,
+        "error": error,
+    }
+
+
+def _status_code_to_error_code(status_code: int) -> str:
+    if status_code == 400:
+        return "bad_request"
+
+    if status_code == 401:
+        return "unauthorized"
+
+    if status_code == 403:
+        return "forbidden"
+
+    if status_code == 404:
+        return "not_found"
+
+    if status_code == 413:
+        return "payload_too_large"
+
+    if status_code == 429:
+        return "rate_limit_exceeded"
+
+    if status_code >= 500:
+        return "internal_server_error"
+
+    return "http_error"
+
+
+def _client_key(request: Request) -> str:
+    forwarded_for = request.headers.get("x-forwarded-for")
+
+    if forwarded_for:
+        return forwarded_for.split(",")[0].strip()
+
+    if request.client:
+        return request.client.host
+
+    return "unknown"
+
+
+def _request_id(request: Request) -> str:
+    return str(getattr(request.state, "request_id", "")) or uuid.uuid4().hex
+
+
+def _env_int(name: str, default: int) -> int:
+    raw = os.getenv(name)
+
+    if raw is None or raw.strip() == "":
+        return default
+
+    try:
+        return int(raw)
+    except ValueError:
+        return default
 
 
 def _iso_from_ms(timestamp_ms: int) -> str:
