@@ -1,0 +1,27 @@
+services:
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: voice-rag-agent-api:local
+    ports:
+      - "8000:8000"
+    environment:
+      VOICE_RAG_ENV: local
+      VOICE_RAG_REASONER: template
+      VOICE_RAG_RETRIEVER: bm25
+      VOICE_RAG_RERANKER: none
+      VOICE_RAG_DATA_DIR: /app/data/sample_docs
+      VOICE_RAG_TRACE_DIR: /app/traces
+      VOICE_RAG_INDEX_DIR: /app/data/index_cache
+      VOICE_RAG_ENABLE_TRACING: "true"
+    volumes:
+      - ./data:/app/data
+      - ./traces:/app/traces
+      - ./outputs:/app/outputs
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://127.0.0.1:8000/ready"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s

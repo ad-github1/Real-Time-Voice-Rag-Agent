@@ -1,0 +1,8 @@
+{
+  "queries": [
+    "What services are used for transcription and text to speech?",
+    "How does the agent keep answers grounded in documents?",
+    "What retrieval modes does the system support?",
+    "How can I upload new documents to the API?"
+  ]
+}

@@ -1,0 +1,22 @@
+{
+  "cases": [
+    {
+      "id": "latency",
+      "query": "How does the agent keep voice latency low?",
+      "must_include": ["latency", "streaming"],
+      "expected_citations": ["voice"]
+    },
+    {
+      "id": "protocols",
+      "query": "What do MCP and A2A expose?",
+      "must_include": ["MCP", "A2A"],
+      "expected_citations": ["protocol"]
+    },
+    {
+      "id": "voice_path",
+      "query": "What services are used for voice transcription and TTS?",
+      "must_include": ["ASR", "TTS"],
+      "expected_citations": ["voice"]
+    }
+  ]
+}

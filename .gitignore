@@ -1,0 +1,24 @@
+.DS_Store
+.env
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+dist/
+build/
+*.egg-info/
+data/index_cache/
+traces/
+outputs/
+!outputs/.gitkeep
+work/
+!work/.gitkeep
+
+# API-uploaded documents
+data/sample_docs/api_uploads/
+.env.*
+!.env.example
